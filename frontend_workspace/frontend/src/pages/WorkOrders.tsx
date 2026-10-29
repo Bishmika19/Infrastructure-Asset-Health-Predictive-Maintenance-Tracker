@@ -56,7 +56,7 @@ export function WorkOrders({ initialCreation, onCreationOpened, onOpenAsset, use
         <div><p className="eyebrow">FR-5 &amp; FR-6 · Case lifecycle</p><h2 id="cases-title">Cases</h2></div>
         <button className="secondary-button" onClick={() => { void load(); }} type="button">Refresh</button>
       </div>
-      <p className="muted">Cases are local demo work orders. Status changes always move forward one step.</p>
+      <p className="muted">Status changes always move forward one step.</p>
       <ErrorNotice message={error} />
       <StatusNotice message={notice} />
       <div className="table-wrap">
