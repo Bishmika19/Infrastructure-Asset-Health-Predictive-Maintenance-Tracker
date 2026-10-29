@@ -22,13 +22,13 @@ export function AppShell({ children, onNavigate, onSignOut, user, view }: AppShe
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="site-header">
         <div>
-          <p className="eyebrow">Operations workspace</p>
+          <p className="eyebrow">Local demo · Changes reset on reload · No server required</p>
           <h1>Asset Health Tracker</h1>
         </div>
         <div className="user-panel">
           <span>{user.username}</span>
           <span className="role-label">{user.role === 'asset_manager' ? 'Asset Manager' : 'Maintenance Crew'}</span>
-          <button className="secondary-button" type="button" onClick={onSignOut}>Sign out</button>
+          <button className="secondary-button" type="button" onClick={onSignOut}>Switch demo role</button>
         </div>
       </header>
       <nav aria-label="Primary navigation" className="primary-nav">

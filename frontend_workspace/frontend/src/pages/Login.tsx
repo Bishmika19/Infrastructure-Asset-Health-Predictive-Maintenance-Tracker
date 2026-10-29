@@ -1,5 +1,5 @@
-import { FormEvent, useState } from 'react';
-import { api, describeProblem, type User } from '../api/client';
+import { useState } from 'react';
+import { api, describeProblem, type Role, type User } from '../api/client';
 import { ErrorNotice } from '../app/AppShell';
 
 interface LoginProps {
@@ -7,54 +7,29 @@ interface LoginProps {
   onAuthenticated: (user: User) => void;
 }
 
+// PUBLIC_INTERFACE
 export function Login({ initialError, onAuthenticated }: LoginProps) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  /** Let users explore either demo role without credentials or a backend. */
   const [error, setError] = useState<string | null>(initialError);
-  const [submitting, setSubmitting] = useState(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
+  async function chooseRole(role: Role): Promise<void> {
     try {
-      onAuthenticated(await api.login(username, password));
-    } catch (requestError) {
-      setError(describeProblem(requestError));
-    } finally {
-      setSubmitting(false);
+      onAuthenticated(await api.selectRole(role));
+    } catch (selectionError) {
+      setError(describeProblem(selectionError));
     }
   }
 
   return (
     <main className="login-page" aria-labelledby="login-title">
       <section className="login-card">
-        <p className="eyebrow">Infrastructure operations</p>
-        <h1 id="login-title">Sign in to Asset Health Tracker</h1>
-        <p>Use your assigned Asset Manager or Maintenance Crew credentials.</p>
+        <p className="eyebrow">Local demo workspace</p>
+        <h1 id="login-title">Explore Asset Health Tracker</h1>
+        <p>No account, backend, or database is required. Choose a demo role.</p>
+        <p>Edits stay in memory until you reload. Demo Crew ID: <code>demo-crew</code>.</p>
         <ErrorNotice message={error} />
-        <form onSubmit={submit}>
-          <label htmlFor="username">Username</label>
-          <input
-            autoComplete="username"
-            id="username"
-            maxLength={128}
-            onChange={(event) => setUsername(event.target.value)}
-            required
-            value={username}
-          />
-          <label htmlFor="password">Password</label>
-          <input
-            autoComplete="current-password"
-            id="password"
-            maxLength={256}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            type="password"
-            value={password}
-          />
-          <button disabled={submitting} type="submit">{submitting ? 'Signing in…' : 'Sign in'}</button>
-        </form>
+        <button onClick={() => { void chooseRole('asset_manager'); }} type="button">Continue as Asset Manager</button>
+        <button className="secondary-button" onClick={() => { void chooseRole('maintenance_crew'); }} type="button">Continue as Maintenance Crew</button>
       </section>
     </main>
   );
