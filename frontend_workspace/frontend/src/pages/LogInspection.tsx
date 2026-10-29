@@ -63,7 +63,6 @@ export function LogInspection({ asset, onBack, onLogged }: LogInspectionProps) {
         <textarea id="observations" maxLength={4000} onChange={(event) => setObservations(event.target.value)} required rows={7} value={observations} />
         <label htmlFor="photos">Photos <span className="optional">(optional; JPEG/PNG, max 10 files, 10 MB each)</span></label>
         <input accept="image/jpeg,image/png" id="photos" multiple onChange={(event) => choosePhotos(event.target.files)} type="file" />
-        <p className="muted">Local demo: photo metadata is recorded only for this session. Files are not uploaded or saved.</p>
         {photos.length > 0 && <p className="muted">{photos.length} photo{photos.length === 1 ? '' : 's'} selected.</p>}
         <button disabled={submitting} type="submit">{submitting ? 'Logging inspection…' : 'Log inspection'}</button>
       </form>

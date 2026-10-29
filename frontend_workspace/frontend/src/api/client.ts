@@ -73,9 +73,27 @@ export interface Inspection {
 
 type AssetInput = Pick<Asset, 'assetId' | 'assetType' | 'location' | 'installationDate' | 'manufacturer' | 'lastServiceDate'>;
 const users: Record<Role, User> = {
-  asset_manager: { id: 'demo-manager', username: 'Demo Manager', role: 'asset_manager' },
-  maintenance_crew: { id: 'demo-crew', username: 'Demo Crew', role: 'maintenance_crew' },
+  asset_manager: { id: 'asset-manager', username: 'Asset Manager', role: 'asset_manager' },
+  maintenance_crew: { id: 'maintenance-crew', username: 'Maintenance Crew', role: 'maintenance_crew' },
 };
+/**
+ * Sign-in accounts checked in the browser (the app runs without a server).
+ * Usernames are matched case-insensitively with surrounding/repeated spaces ignored;
+ * passwords must match exactly.
+ */
+const accounts: Array<{ username: string; password: string; role: Role }> = [
+  { username: 'asset manager', password: 'asset manager', role: 'asset_manager' },
+  { username: 'maintenance crew', password: 'maintenance crew', role: 'maintenance_crew' },
+];
+
+/** Crew members that a manager can assign Cases to. */
+export const crewMembers: ReadonlyArray<Pick<User, 'id' | 'username'>> = [
+  { id: users.maintenance_crew.id, username: users.maintenance_crew.username },
+];
+
+function normalizeUsername(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
 const seedDate = '2026-10-20T09:00:00.000Z';
 const seedAssets: Array<[string, AssetType, string, string, number]> = [
   ['TR-001', 'Transformer', 'North Grid Station', 'Siemens', 32],
@@ -112,15 +130,15 @@ export class ApiProblem extends Error {
 
 // PUBLIC_INTERFACE
 export class LocalDataClient {
-  /** In-memory demo repository. Reloading the page restores the hardcoded dataset. */
-  private user: User | null = copy(users.asset_manager);
+  /** In-browser data repository seeded with the built-in asset dataset. Starts signed out. */
+  private user: User | null = null;
   private sequence = 0;
   private assets: Asset[] = seedAssets.map(([assetId, assetType, location, manufacturer, score]) => ({
     assetId, assetType, location, manufacturer,
     installationDate: '2018-04-15', lastServiceDate: '2026-07-10', status: 'active',
     currentHealthScore: score, currentColorBand: bandFor(score),
     flaggedSince: score < 75 ? seedDate : null, scoreCalculatedAt: seedDate,
-    version: 1, createdBy: 'demo-manager', createdAt: seedDate, updatedAt: seedDate,
+    version: 1, createdBy: users.asset_manager.id, createdAt: seedDate, updatedAt: seedDate,
   }));
   private cases: Case[] = [{
     id: 'WO-001', assetId: 'TR-001',
@@ -129,13 +147,13 @@ export class LocalDataClient {
       manufacturer: 'Siemens', installationDate: '2018-04-15', lastServiceDate: '2026-07-10',
     },
     alertId: 'alert-TR-001', faultDescription: 'Inspect overheating and replace worn cooling components.',
-    priority: 'High', assigneeId: 'demo-crew', status: 'Assigned',
-    createdBy: 'demo-manager', createdAt: seedDate, updatedAt: seedDate, version: 1,
+    priority: 'High', assigneeId: users.maintenance_crew.id, status: 'Assigned',
+    createdBy: users.asset_manager.id, createdAt: seedDate, updatedAt: seedDate, version: 1,
   }];
   private history: Record<string, HistoryEvent[]> = Object.fromEntries(
     seedAssets.map(([id, , , , score]) => [id, [{
       eventId: `inspection-${id}`, eventKind: 'inspection_logged', occurredAt: seedDate,
-      actorId: 'demo-crew', details: { observations: 'Scheduled condition assessment.', healthScore: score },
+      actorId: users.maintenance_crew.id, details: { observations: 'Scheduled condition assessment.', healthScore: score },
     }, ...(score < 75 ? [{
       eventId: `alert-${id}`, eventKind: 'alert_opened' as const, occurredAt: seedDate,
       actorId: null, details: { healthScore: score, colorBand: bandFor(score) },
@@ -146,11 +164,11 @@ export class LocalDataClient {
     return `${prefix}-local-${this.sequence}`;
   }
   private actor(): User {
-    if (!this.user) throw new ApiProblem(401, 'choose_role', 'Choose a demo role to continue.');
+    if (!this.user) throw new ApiProblem(401, 'sign_in_required', 'Please sign in to continue.');
     return this.user;
   }
   private manager(): void {
-    if (this.actor().role !== 'asset_manager') throw new ApiProblem(403, 'manager_required', 'This action requires the Asset Manager demo role.');
+    if (this.actor().role !== 'asset_manager') throw new ApiProblem(403, 'manager_required', 'This action requires the Asset Manager role.');
   }
   private asset(assetId: string): Asset {
     const asset = this.assets.find((item) => item.assetId === assetId);
@@ -178,28 +196,37 @@ export class LocalDataClient {
   }
   // PUBLIC_INTERFACE
   get sessionUser(): User | null {
-    /** Return the currently selected demo role, not an authenticated identity. */
+    /** Return the signed-in user, or null when signed out. */
     return copy(this.user);
   }
   // PUBLIC_INTERFACE
   get hasToken(): boolean {
-    /** Compatibility flag for the existing app; no token is issued or stored. */
+    /** Whether a user is currently signed in; no token is issued or stored. */
     return this.user !== null;
   }
   // PUBLIC_INTERFACE
-  async selectRole(role: Role): Promise<User> {
-    /** Select a local demo persona without credentials or a server request. */
-    this.user = copy(users[role]);
+  async login(username: string, password: string): Promise<User> {
+    /**
+     * Sign in with a username and password.
+     * Returns the signed-in user, or rejects with a 422 when fields are empty
+     * and a 401 when the credentials do not match a known account.
+     */
+    if (!username.trim() || !password) {
+      throw new ApiProblem(422, 'credentials_required', 'Enter your username and password.');
+    }
+    const account = accounts.find((item) => item.username === normalizeUsername(username) && item.password === password);
+    if (!account) throw new ApiProblem(401, 'invalid_credentials', 'Incorrect username or password.');
+    this.user = copy(users[account.role]);
     return copy(this.user);
   }
   // PUBLIC_INTERFACE
   async me(): Promise<User> {
-    /** Return the current local demo persona. */
+    /** Return the signed-in user, rejecting with a 401 when signed out. */
     return copy(this.actor());
   }
   // PUBLIC_INTERFACE
   clearSession(): void {
-    /** Clear the selected persona while retaining this page's demo edits. */
+    /** Sign out while retaining this page's data edits. */
     this.user = null;
   }
   // PUBLIC_INTERFACE
@@ -216,7 +243,7 @@ export class LocalDataClient {
   }
   // PUBLIC_INTERFACE
   async createAsset(values: AssetInput): Promise<Asset> {
-    /** Add an unscored asset to the current demo session. */
+    /** Add an unscored asset to the register. */
     this.manager();
     if (!values.assetId.trim() || !values.location.trim() || !values.manufacturer.trim()) {
       throw new ApiProblem(422, 'required_fields', 'Asset ID, location and manufacturer are required.');
@@ -253,7 +280,7 @@ export class LocalDataClient {
   }
   // PUBLIC_INTERFACE
   async listQueue(cursor?: string): Promise<Page<QueueItem>> {
-    /** Derive predictive alerts from active Amber and Red demo assets. */
+    /** Derive predictive alerts from active Amber and Red assets. */
     const items = this.assets.filter((asset) => asset.status === 'active' && asset.flaggedSince).map((asset) => ({
       alertId: `alert-${asset.assetId}`, assetId: asset.assetId, assetType: asset.assetType,
       location: asset.location, currentHealthScore: asset.currentHealthScore!,
@@ -276,7 +303,7 @@ export class LocalDataClient {
   }
   // PUBLIC_INTERFACE
   async createCase(values: { assetId: string; alertId?: string; faultDescription: string; priority: CasePriority; assigneeId?: string }): Promise<Case> {
-    /** Create a demo work order and record its initial status in history. */
+    /** Create a work order and record its initial status in history. */
     this.manager();
     const asset = this.activeAsset(values.assetId);
     if (!values.faultDescription.trim()) throw new ApiProblem(422, 'description_required', 'Enter a fault description.');
@@ -326,7 +353,7 @@ export class LocalDataClient {
       throw new ApiProblem(422, 'invalid_photos', 'Choose at most 10 JPEG or PNG photos, no larger than 10 MB each.');
     }
     const now = new Date().toISOString();
-    // Illustrative demo scoring only, not a production predictive model.
+    // Illustrative rating-based scoring, not a production predictive model.
     const scores: Record<ConditionRating, number> = { Excellent: 95, Good: 82, Fair: 62, Poor: 38, Critical: 15 };
     const wasFlagged = Boolean(asset.flaggedSince);
     asset.currentHealthScore = scores[values.conditionRating];
@@ -361,6 +388,6 @@ export function etagFor(version: number): string {
 
 // PUBLIC_INTERFACE
 export function describeProblem(error: unknown): string {
-  /** Provide a user-readable local validation or workflow error. */
-  return error instanceof ApiProblem ? error.message : 'The local action could not be completed. Please try again.';
+  /** Provide a user-readable validation or workflow error. */
+  return error instanceof ApiProblem ? error.message : 'The action could not be completed. Please try again.';
 }

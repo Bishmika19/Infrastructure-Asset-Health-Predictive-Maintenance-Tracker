@@ -33,13 +33,23 @@ test('manager screens work with hardcoded data and no backend requests', async (
   expect(backendRequests).toEqual([]);
 });
 
-test('crew can select a demo role and open inspection without credentials', async ({ page }) => {
+test('login rejects a wrong password', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  await expectNoWcag21AaViolations(page, 'Login');
+  await page.getByLabel('Username').fill('asset manager');
+  await page.getByLabel('Password', { exact: true }).fill('wrong password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Incorrect username or password.');
+  await expectNoWcag21AaViolations(page, 'Login error');
+});
+
+test('crew can sign in, open inspection and sign out', async ({ page }) => {
   await loginAs(page, TEST_ACCOUNTS.crew);
   await expect(page.getByRole('button', { name: 'Create asset' })).toHaveCount(0);
   await page.locator('tr', { hasText: 'TR-001' }).getByRole('button', { name: 'Log inspection' }).click();
   await expect(page.getByRole('heading', { name: 'Log inspection for TR-001' })).toBeVisible();
   await expectNoWcag21AaViolations(page, 'Inspection');
-  await page.getByRole('button', { name: 'Switch demo role' }).click();
-  await expect(page.getByRole('heading', { name: 'Explore Asset Health Tracker' })).toBeVisible();
-  await expectNoWcag21AaViolations(page, 'Role picker');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 });

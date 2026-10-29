@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { api, describeProblem, type Case, type CasePriority } from '../api/client';
+import { api, crewMembers, describeProblem, type Case, type CasePriority } from '../api/client';
 import { ErrorNotice } from '../app/AppShell';
 
 const priorities: CasePriority[] = ['Low', 'Medium', 'High', 'Critical'];
@@ -49,8 +49,11 @@ export function CreateWorkOrderModal({ alertId, assetId, onClose, onCreated }: C
         <select id="priority" onChange={(event) => setPriority(event.target.value as CasePriority)} value={priority}>
           {priorities.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
-        <label htmlFor="assignee-id">Crew assignee ID <span className="optional">(optional)</span></label>
-        <input id="assignee-id" onChange={(event) => setAssigneeId(event.target.value)} placeholder="UUID of active Maintenance Crew user" value={assigneeId} />
+        <label htmlFor="assignee-id">Assign to crew <span className="optional">(optional)</span></label>
+        <select id="assignee-id" onChange={(event) => setAssigneeId(event.target.value)} value={assigneeId}>
+          <option value="">Unassigned</option>
+          {crewMembers.map((member) => <option key={member.id} value={member.id}>{member.username}</option>)}
+        </select>
         <div className="action-row"><button className="secondary-button" onClick={onClose} type="button">Cancel</button><button disabled={submitting} type="submit">{submitting ? 'Creating…' : 'Create Case'}</button></div>
       </form>
     </div>
