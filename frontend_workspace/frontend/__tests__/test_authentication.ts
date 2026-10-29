@@ -1,34 +1,12 @@
 import { expect, type Page } from '@playwright/test';
 
-export interface SeededAccount {
-  username: string;
-  password: string;
-}
-
-export const TEST_ACCOUNTS = {
-  manager: {
-    username: 'playwright_manager',
-    password: 'PlaywrightManagerPassword-2026',
-  },
-  crew: {
-    username: 'playwright_crew',
-    password: 'PlaywrightCrewPassword-2026',
-  },
-} as const satisfies Record<string, SeededAccount>;
+export const TEST_ACCOUNTS = { manager: 'Asset Manager', crew: 'Maintenance Crew' } as const;
 
 // PUBLIC_INTERFACE
-/**
- * Sign in through the rendered login form and wait for the authenticated shell.
- *
- * @param page - Browser page displaying the frontend.
- * @param account - Development-only seeded account credentials.
- */
-export async function loginAs(page: Page, account: SeededAccount): Promise<void> {
+export async function loginAs(page: Page, role: typeof TEST_ACCOUNTS[keyof typeof TEST_ACCOUNTS]): Promise<void> {
+  /** Select a demo persona using the rendered role picker; no server or account exists. */
   await page.goto('/');
-  await page.getByLabel('Username').fill(account.username);
-  await page.getByLabel('Password').fill(account.password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-
-  await expect(page.getByText(account.username, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Switch demo role' }).click();
+  await page.getByRole('button', { name: `Continue as ${role}` }).click();
   await expect(page.getByRole('heading', { name: 'Infrastructure assets' })).toBeVisible();
 }

@@ -42,7 +42,7 @@ export function WorkOrders({ initialCreation, onCreationOpened, onOpenAsset, use
   function created(caseRecord: Case): void {
     setCreatingFor(null);
     setCases((current) => [caseRecord, ...current]);
-    setNotice(`Case ${caseRecord.id} created as Open.`);
+    setNotice(`Case ${caseRecord.id} created as ${caseRecord.status}.`);
   }
 
   function updated(caseRecord: Case): void {
@@ -56,7 +56,7 @@ export function WorkOrders({ initialCreation, onCreationOpened, onOpenAsset, use
         <div><p className="eyebrow">FR-5 &amp; FR-6 · Case lifecycle</p><h2 id="cases-title">Cases</h2></div>
         <button className="secondary-button" onClick={() => { void load(); }} type="button">Refresh</button>
       </div>
-      <p className="muted">A Case is the API’s work-order alias. Status changes always move forward one step.</p>
+      <p className="muted">Cases are local demo work orders. Status changes always move forward one step.</p>
       <ErrorNotice message={error} />
       <StatusNotice message={notice} />
       <div className="table-wrap">

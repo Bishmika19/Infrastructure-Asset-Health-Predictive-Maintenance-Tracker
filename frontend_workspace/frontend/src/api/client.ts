@@ -1,16 +1,3 @@
-function defaultApiBaseUrl(): string {
-  if (typeof window === 'undefined') return 'http://localhost:8000';
-
-  // The preview containers share a hostname and use the manifest-assigned backend port.
-  // A VITE_API_BASE_URL override remains available for reverse-proxy deployments.
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
-}
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? defaultApiBaseUrl())
-  .replace(/\/$/, '');
-
-const SESSION_KEY = 'asset-health.session';
-
 export type Role = 'asset_manager' | 'maintenance_crew';
 export type AssetType = 'Transformer' | 'Substation' | 'Pump' | 'Pipeline' | 'Other';
 export type ColorBand = 'Green' | 'Amber' | 'Red';
@@ -18,12 +5,7 @@ export type CaseStatus = 'Open' | 'Assigned' | 'In Progress' | 'Complete';
 export type CasePriority = 'Low' | 'Medium' | 'High' | 'Critical';
 export type ConditionRating = 'Excellent' | 'Good' | 'Fair' | 'Poor' | 'Critical';
 
-export interface User {
-  id: string;
-  username: string;
-  role: Role;
-}
-
+export interface User { id: string; username: string; role: Role }
 export interface Asset {
   assetId: string;
   assetType: AssetType;
@@ -41,12 +23,7 @@ export interface Asset {
   createdAt: string;
   updatedAt: string;
 }
-
-export interface Page<T> {
-  items: T[];
-  nextCursor: string | null;
-}
-
+export interface Page<T> { items: T[]; nextCursor: string | null }
 export interface QueueItem {
   alertId: string;
   assetId: string;
@@ -56,18 +33,10 @@ export interface QueueItem {
   currentColorBand: ColorBand;
   flaggedSince: string;
 }
-
 export interface Case {
   id: string;
   assetId: string;
-  assetSnapshot: {
-    assetId: string;
-    assetType: AssetType;
-    location: string;
-    installationDate: string;
-    manufacturer: string;
-    lastServiceDate: string | null;
-  };
+  assetSnapshot: Pick<Asset, 'assetId' | 'assetType' | 'location' | 'installationDate' | 'manufacturer' | 'lastServiceDate'>;
   alertId: string | null;
   faultDescription: string;
   priority: CasePriority;
@@ -78,7 +47,6 @@ export interface Case {
   updatedAt: string;
   version: number;
 }
-
 export interface HistoryEvent {
   eventId: string;
   eventKind: 'inspection_logged' | 'alert_opened' | 'alert_resolved' | 'work_order_status_changed';
@@ -86,7 +54,6 @@ export interface HistoryEvent {
   actorId: string | null;
   details: Record<string, unknown>;
 }
-
 export interface Inspection {
   id: string;
   assetId: string;
@@ -104,238 +71,296 @@ export interface Inspection {
   }>;
 }
 
-interface Session {
-  token: string;
-  user: User;
+type AssetInput = Pick<Asset, 'assetId' | 'assetType' | 'location' | 'installationDate' | 'manufacturer' | 'lastServiceDate'>;
+const users: Record<Role, User> = {
+  asset_manager: { id: 'demo-manager', username: 'Demo Manager', role: 'asset_manager' },
+  maintenance_crew: { id: 'demo-crew', username: 'Demo Crew', role: 'maintenance_crew' },
+};
+const seedDate = '2026-10-20T09:00:00.000Z';
+const seedAssets: Array<[string, AssetType, string, string, number]> = [
+  ['TR-001', 'Transformer', 'North Grid Station', 'Siemens', 32],
+  ['SS-002', 'Substation', 'East Distribution Hub', 'ABB', 64],
+  ['PM-003', 'Pump', 'Riverside Pumping Station', 'Grundfos', 92],
+  ['PL-004', 'Pipeline', 'West Water Corridor', 'Flowserve', 48],
+  ['TR-005', 'Transformer', 'South Grid Station', 'GE', 85],
+  ['PM-006', 'Pump', 'Central Water Works', 'Xylem', 76],
+];
+
+function bandFor(score: number): ColorBand {
+  return score < 50 ? 'Red' : score < 75 ? 'Amber' : 'Green';
+}
+function copy<T>(value: T): T {
+  return structuredClone(value);
+}
+function page<T>(items: T[], cursor?: string): Page<T> {
+  const offset = Number(cursor ?? 0);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new ApiProblem(400, 'invalid_cursor', 'This page is not available.');
+  }
+  return copy({ items: items.slice(offset, offset + 10), nextCursor: offset + 10 < items.length ? String(offset + 10) : null });
 }
 
-interface RequestOptions extends Omit<RequestInit, 'body' | 'headers'> {
-  body?: BodyInit | object;
-  headers?: HeadersInit;
-  ifMatch?: string;
-  idempotencyKey?: string;
-}
-
+// PUBLIC_INTERFACE
 export class ApiProblem extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly requestId?: string;
-
-  constructor(status: number, code: string, message: string, requestId?: string) {
+  /** A local validation error, retaining the existing UI error contract. */
+  // PUBLIC_INTERFACE
+  constructor(public readonly status: number, public readonly code: string, message: string, public readonly requestId?: string) {
     super(message);
     this.name = 'ApiProblem';
-    this.status = status;
-    this.code = code;
-    this.requestId = requestId;
   }
 }
 
-function readSession(): Session | null {
-  try {
-    const stored = window.localStorage.getItem(SESSION_KEY);
-    return stored ? (JSON.parse(stored) as Session) : null;
-  } catch {
-    return null;
+// PUBLIC_INTERFACE
+export class LocalDataClient {
+  /** In-memory demo repository. Reloading the page restores the hardcoded dataset. */
+  private user: User | null = copy(users.asset_manager);
+  private sequence = 0;
+  private assets: Asset[] = seedAssets.map(([assetId, assetType, location, manufacturer, score]) => ({
+    assetId, assetType, location, manufacturer,
+    installationDate: '2018-04-15', lastServiceDate: '2026-07-10', status: 'active',
+    currentHealthScore: score, currentColorBand: bandFor(score),
+    flaggedSince: score < 75 ? seedDate : null, scoreCalculatedAt: seedDate,
+    version: 1, createdBy: 'demo-manager', createdAt: seedDate, updatedAt: seedDate,
+  }));
+  private cases: Case[] = [{
+    id: 'WO-001', assetId: 'TR-001',
+    assetSnapshot: {
+      assetId: 'TR-001', assetType: 'Transformer', location: 'North Grid Station',
+      manufacturer: 'Siemens', installationDate: '2018-04-15', lastServiceDate: '2026-07-10',
+    },
+    alertId: 'alert-TR-001', faultDescription: 'Inspect overheating and replace worn cooling components.',
+    priority: 'High', assigneeId: 'demo-crew', status: 'Assigned',
+    createdBy: 'demo-manager', createdAt: seedDate, updatedAt: seedDate, version: 1,
+  }];
+  private history: Record<string, HistoryEvent[]> = Object.fromEntries(
+    seedAssets.map(([id, , , , score]) => [id, [{
+      eventId: `inspection-${id}`, eventKind: 'inspection_logged', occurredAt: seedDate,
+      actorId: 'demo-crew', details: { observations: 'Scheduled condition assessment.', healthScore: score },
+    }, ...(score < 75 ? [{
+      eventId: `alert-${id}`, eventKind: 'alert_opened' as const, occurredAt: seedDate,
+      actorId: null, details: { healthScore: score, colorBand: bandFor(score) },
+    }] : [])]]),
+  );
+  private id(prefix: string): string {
+    this.sequence += 1;
+    return `${prefix}-local-${this.sequence}`;
   }
-}
-
-function saveSession(session: Session): void {
-  window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-}
-
-function toQuery(params: Record<string, string | number | boolean | null | undefined>): string {
-  const search = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') search.set(key, String(value));
-  });
-  const encoded = search.toString();
-  return encoded ? `?${encoded}` : '';
-}
-
-function isBodyInit(body: object | BodyInit): body is BodyInit {
-  return body instanceof FormData || body instanceof URLSearchParams || body instanceof Blob;
-}
-
-function createIdempotencyKey(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-
-  const values = crypto.getRandomValues(new Uint32Array(4));
-  return Array.from(values, (value) => value.toString(16).padStart(8, '0')).join('-');
-}
-
-class ApiClient {
-  private session: Session | null = readSession();
-
+  private actor(): User {
+    if (!this.user) throw new ApiProblem(401, 'choose_role', 'Choose a demo role to continue.');
+    return this.user;
+  }
+  private manager(): void {
+    if (this.actor().role !== 'asset_manager') throw new ApiProblem(403, 'manager_required', 'This action requires the Asset Manager demo role.');
+  }
+  private asset(assetId: string): Asset {
+    const asset = this.assets.find((item) => item.assetId === assetId);
+    if (!asset) throw new ApiProblem(404, 'asset_not_found', 'The asset was not found.');
+    return asset;
+  }
+  private activeAsset(assetId: string): Asset {
+    const asset = this.asset(assetId);
+    if (asset.status !== 'active') throw new ApiProblem(409, 'inactive_asset', 'This asset is deactivated.');
+    return asset;
+  }
+  private caseRecord(id: string): Case {
+    const item = this.cases.find((record) => record.id === id);
+    if (!item) throw new ApiProblem(404, 'case_not_found', 'The Case was not found.');
+    return item;
+  }
+  private checkVersion(version: number, etag: string): void {
+    if (etag !== etagFor(version)) throw new ApiProblem(412, 'version_conflict', 'This record has changed. Refresh and try again.');
+  }
+  private record(assetId: string, eventKind: HistoryEvent['eventKind'], details: Record<string, unknown>): void {
+    (this.history[assetId] ??= []).unshift({
+      eventId: this.id('event'), eventKind, occurredAt: new Date().toISOString(),
+      actorId: this.actor().id, details: copy(details),
+    });
+  }
+  // PUBLIC_INTERFACE
   get sessionUser(): User | null {
-    return this.session?.user ?? null;
+    /** Return the currently selected demo role, not an authenticated identity. */
+    return copy(this.user);
   }
-
+  // PUBLIC_INTERFACE
   get hasToken(): boolean {
-    return Boolean(this.session?.token);
+    /** Compatibility flag for the existing app; no token is issued or stored. */
+    return this.user !== null;
   }
-
-  async login(username: string, password: string): Promise<User> {
-    const response = await this.request<{ accessToken: string; user: User }>('/api/v1/auth/login', {
-      method: 'POST',
-      body: { username, password },
-    });
-    this.session = { token: response.data.accessToken, user: response.data.user };
-    saveSession(this.session);
-    return response.data.user;
+  // PUBLIC_INTERFACE
+  async selectRole(role: Role): Promise<User> {
+    /** Select a local demo persona without credentials or a server request. */
+    this.user = copy(users[role]);
+    return copy(this.user);
   }
-
+  // PUBLIC_INTERFACE
   async me(): Promise<User> {
-    const response = await this.request<User>('/api/v1/auth/me');
-    if (this.session) {
-      this.session = { ...this.session, user: response.data };
-      saveSession(this.session);
-    }
-    return response.data;
+    /** Return the current local demo persona. */
+    return copy(this.actor());
   }
-
+  // PUBLIC_INTERFACE
   clearSession(): void {
-    this.session = null;
-    window.localStorage.removeItem(SESSION_KEY);
+    /** Clear the selected persona while retaining this page's demo edits. */
+    this.user = null;
   }
-
-  listAssets(filters: { assetType?: AssetType; location?: string; cursor?: string } = {}): Promise<Page<Asset>> {
-    return this.getPage('/api/v1/assets', filters);
+  // PUBLIC_INTERFACE
+  async listAssets(filters: { assetType?: AssetType; location?: string; cursor?: string } = {}): Promise<Page<Asset>> {
+    /** Filter the local asset register and return a page of results. */
+    return page(this.assets.filter((asset) =>
+      (!filters.assetType || asset.assetType === filters.assetType)
+      && (!filters.location || asset.location.toLowerCase().includes(filters.location.toLowerCase()))), filters.cursor);
   }
-
-  getAsset(assetId: string): Promise<Asset> {
-    return this.request<Asset>(`/api/v1/assets/${encodeURIComponent(assetId)}`).then((result) => result.data);
+  // PUBLIC_INTERFACE
+  async getAsset(assetId: string): Promise<Asset> {
+    /** Return an isolated copy of a local asset. */
+    return copy(this.asset(assetId));
   }
-
-  createAsset(values: Omit<Asset, 'status' | 'currentHealthScore' | 'currentColorBand' | 'flaggedSince' | 'scoreCalculatedAt' | 'version' | 'createdBy' | 'createdAt' | 'updatedAt'>): Promise<Asset> {
-    return this.request<Asset>('/api/v1/assets', { method: 'POST', body: values }).then((result) => result.data);
-  }
-
-  updateAsset(assetId: string, values: Partial<Pick<Asset, 'assetType' | 'location' | 'installationDate' | 'manufacturer' | 'lastServiceDate'>>, etag: string): Promise<Asset> {
-    return this.request<Asset>(`/api/v1/assets/${encodeURIComponent(assetId)}`, {
-      method: 'PUT',
-      body: values,
-      ifMatch: etag,
-    }).then((result) => result.data);
-  }
-
-  deactivateAsset(assetId: string, etag: string): Promise<Asset> {
-    return this.request<Asset>(`/api/v1/assets/${encodeURIComponent(assetId)}/deactivate`, {
-      method: 'POST',
-      ifMatch: etag,
-    }).then((result) => result.data);
-  }
-
-  listQueue(cursor?: string): Promise<Page<QueueItem>> {
-    return this.getPage('/api/v1/maintenance-queue', { cursor });
-  }
-
-  listCases(filters: { cursor?: string; assetId?: string; status?: CaseStatus } = {}): Promise<Page<Case>> {
-    return this.getPage('/api/v1/cases', filters);
-  }
-
-  getCase(caseId: string): Promise<{ data: Case; etag: string | null }> {
-    return this.request<Case>(`/api/v1/cases/${caseId}`);
-  }
-
-  createCase(values: {
-    assetId: string;
-    alertId?: string;
-    faultDescription: string;
-    priority: CasePriority;
-    assigneeId?: string;
-  }, idempotencyKey = createIdempotencyKey()): Promise<Case> {
-    return this.request<Case>('/api/v1/cases', {
-      method: 'POST',
-      body: values,
-      idempotencyKey,
-    }).then((result) => result.data);
-  }
-
-  updateCase(caseId: string, values: Partial<Pick<Case, 'status' | 'faultDescription' | 'priority' | 'assigneeId'>>, etag: string): Promise<Case> {
-    return this.request<Case>(`/api/v1/cases/${caseId}`, {
-      method: 'PATCH',
-      body: values,
-      ifMatch: etag,
-    }).then((result) => result.data);
-  }
-
-  listHistory(assetId: string, cursor?: string): Promise<Page<HistoryEvent>> {
-    return this.getPage(`/api/v1/assets/${encodeURIComponent(assetId)}/history`, { cursor });
-  }
-
-  createInspection(assetId: string, values: {
-    conditionRating: ConditionRating;
-    observations: string;
-    photos: File[];
-  }): Promise<Inspection> {
-    const form = new FormData();
-    form.append('condition_rating', values.conditionRating);
-    form.append('observations', values.observations);
-    values.photos.forEach((photo) => form.append('photos', photo));
-    return this.request<Inspection>(`/api/v1/assets/${encodeURIComponent(assetId)}/inspections`, {
-      method: 'POST',
-      body: form,
-    }).then((result) => result.data);
-  }
-
-  private getPage<T>(path: string, query: Record<string, string | undefined>): Promise<Page<T>> {
-    return this.request<Page<T>>(`${path}${toQuery(query)}`).then((result) => result.data);
-  }
-
-  private async request<T>(path: string, options: RequestOptions = {}): Promise<{ data: T; etag: string | null }> {
-    const headers = new Headers(options.headers);
-    headers.set('Accept', 'application/json');
-    if (this.session?.token) headers.set('Authorization', `Bearer ${this.session.token}`);
-    if (options.ifMatch) headers.set('If-Match', options.ifMatch);
-    if (options.idempotencyKey) headers.set('Idempotency-Key', options.idempotencyKey);
-
-    let body: BodyInit | undefined;
-    if (options.body !== undefined) {
-      if (isBodyInit(options.body)) {
-        body = options.body;
-      } else {
-        headers.set('Content-Type', 'application/json');
-        body = JSON.stringify(options.body);
-      }
+  // PUBLIC_INTERFACE
+  async createAsset(values: AssetInput): Promise<Asset> {
+    /** Add an unscored asset to the current demo session. */
+    this.manager();
+    if (!values.assetId.trim() || !values.location.trim() || !values.manufacturer.trim()) {
+      throw new ApiProblem(422, 'required_fields', 'Asset ID, location and manufacturer are required.');
     }
-
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      body,
-      headers,
-    });
-
-    if (!response.ok) {
-      const problem = await response.json().catch(() => null) as {
-        code?: string;
-        detail?: string;
-        title?: string;
-        requestId?: string;
-      } | null;
-      throw new ApiProblem(
-        response.status,
-        problem?.code ?? 'request_failed',
-        problem?.detail ?? problem?.title ?? `Request failed with status ${response.status}`,
-        problem?.requestId,
-      );
-    }
-
-    return {
-      data: await response.json() as T,
-      etag: response.headers.get('ETag'),
+    if (this.assets.some((asset) => asset.assetId === values.assetId)) throw new ApiProblem(409, 'duplicate_asset', 'An asset with this ID already exists.');
+    const now = new Date().toISOString();
+    const asset: Asset = {
+      ...copy(values), status: 'active', currentHealthScore: null, currentColorBand: null,
+      flaggedSince: null, scoreCalculatedAt: null, version: 1,
+      createdBy: this.actor().id, createdAt: now, updatedAt: now,
     };
+    this.assets.unshift(asset);
+    return copy(asset);
+  }
+  // PUBLIC_INTERFACE
+  async updateAsset(assetId: string, values: Partial<Omit<AssetInput, 'assetId'>>, etag: string): Promise<Asset> {
+    /** Update local asset details, rejecting stale versions. */
+    this.manager();
+    const asset = this.activeAsset(assetId);
+    this.checkVersion(asset.version, etag);
+    Object.assign(asset, copy(values), { version: asset.version + 1, updatedAt: new Date().toISOString() });
+    return copy(asset);
+  }
+  // PUBLIC_INTERFACE
+  async deactivateAsset(assetId: string, etag: string): Promise<Asset> {
+    /** Deactivate an asset and remove its local queue entry. */
+    this.manager();
+    const asset = this.activeAsset(assetId);
+    this.checkVersion(asset.version, etag);
+    asset.status = 'deactivated';
+    asset.version += 1;
+    asset.updatedAt = new Date().toISOString();
+    return copy(asset);
+  }
+  // PUBLIC_INTERFACE
+  async listQueue(cursor?: string): Promise<Page<QueueItem>> {
+    /** Derive predictive alerts from active Amber and Red demo assets. */
+    const items = this.assets.filter((asset) => asset.status === 'active' && asset.flaggedSince).map((asset) => ({
+      alertId: `alert-${asset.assetId}`, assetId: asset.assetId, assetType: asset.assetType,
+      location: asset.location, currentHealthScore: asset.currentHealthScore!,
+      currentColorBand: asset.currentColorBand!, flaggedSince: asset.flaggedSince!,
+    })).sort((a, b) => a.currentHealthScore - b.currentHealthScore);
+    return page(items, cursor);
+  }
+  // PUBLIC_INTERFACE
+  async listCases(filters: { cursor?: string; assetId?: string; status?: CaseStatus } = {}): Promise<Page<Case>> {
+    /** Return filtered local work orders. */
+    return page(this.cases.filter((item) =>
+      (!filters.assetId || item.assetId === filters.assetId)
+      && (!filters.status || item.status === filters.status)), filters.cursor);
+  }
+  // PUBLIC_INTERFACE
+  async getCase(caseId: string): Promise<{ data: Case; etag: string | null }> {
+    /** Return a local Case with its optimistic update version. */
+    const item = this.caseRecord(caseId);
+    return { data: copy(item), etag: etagFor(item.version) };
+  }
+  // PUBLIC_INTERFACE
+  async createCase(values: { assetId: string; alertId?: string; faultDescription: string; priority: CasePriority; assigneeId?: string }): Promise<Case> {
+    /** Create a demo work order and record its initial status in history. */
+    this.manager();
+    const asset = this.activeAsset(values.assetId);
+    if (!values.faultDescription.trim()) throw new ApiProblem(422, 'description_required', 'Enter a fault description.');
+    const now = new Date().toISOString();
+    const item: Case = {
+      ...copy(values), id: this.id('WO'), assetSnapshot: {
+        assetId: asset.assetId, assetType: asset.assetType, location: asset.location,
+        installationDate: asset.installationDate, manufacturer: asset.manufacturer, lastServiceDate: asset.lastServiceDate,
+      },
+      alertId: values.alertId ?? null, assigneeId: values.assigneeId || null,
+      status: values.assigneeId ? 'Assigned' : 'Open', version: 1,
+      createdBy: this.actor().id, createdAt: now, updatedAt: now,
+    };
+    this.cases.unshift(item);
+    this.record(item.assetId, 'work_order_status_changed', { caseId: item.id, status: item.status });
+    return copy(item);
+  }
+  // PUBLIC_INTERFACE
+  async updateCase(caseId: string, values: Partial<Pick<Case, 'status' | 'faultDescription' | 'priority' | 'assigneeId'>>, etag: string): Promise<Case> {
+    /** Advance a local work order, preserving role and version checks. */
+    const item = this.caseRecord(caseId);
+    const actor = this.actor();
+    this.checkVersion(item.version, etag);
+    const next: Record<CaseStatus, CaseStatus | null> = { Open: 'Assigned', Assigned: 'In Progress', 'In Progress': 'Complete', Complete: null };
+    if (actor.role !== 'asset_manager' && (
+      item.assigneeId !== actor.id || !['Assigned', 'In Progress'].includes(item.status)
+      || Object.keys(values).some((key) => key !== 'status')
+    )) throw new ApiProblem(403, 'not_assigned', 'Only the assigned crew or a manager can advance this Case.');
+    if (values.status && values.status !== next[item.status]) throw new ApiProblem(409, 'invalid_transition', 'Advance the Case one status at a time.');
+    Object.assign(item, copy(values), { version: item.version + 1, updatedAt: new Date().toISOString() });
+    this.record(item.assetId, 'work_order_status_changed', { caseId, status: item.status });
+    return copy(item);
+  }
+  // PUBLIC_INTERFACE
+  async listHistory(assetId: string, cursor?: string): Promise<Page<HistoryEvent>> {
+    /** Return the selected asset's newest-first local timeline. */
+    this.asset(assetId);
+    return page(this.history[assetId] ?? [], cursor);
+  }
+  // PUBLIC_INTERFACE
+  async createInspection(assetId: string, values: { conditionRating: ConditionRating; observations: string; photos: File[] }): Promise<Inspection> {
+    /** Record an inspection locally; photo metadata only is retained, with no upload. */
+    const actor = this.actor();
+    const asset = this.activeAsset(assetId);
+    if (!values.observations.trim()) throw new ApiProblem(422, 'observations_required', 'Enter inspection observations.');
+    if (values.photos.length > 10 || values.photos.some((photo) => !['image/jpeg', 'image/png'].includes(photo.type) || photo.size > 10_000_000)) {
+      throw new ApiProblem(422, 'invalid_photos', 'Choose at most 10 JPEG or PNG photos, no larger than 10 MB each.');
+    }
+    const now = new Date().toISOString();
+    // Illustrative demo scoring only, not a production predictive model.
+    const scores: Record<ConditionRating, number> = { Excellent: 95, Good: 82, Fair: 62, Poor: 38, Critical: 15 };
+    const wasFlagged = Boolean(asset.flaggedSince);
+    asset.currentHealthScore = scores[values.conditionRating];
+    asset.currentColorBand = bandFor(asset.currentHealthScore);
+    asset.flaggedSince = asset.currentColorBand === 'Green' ? null : asset.flaggedSince ?? now;
+    asset.scoreCalculatedAt = now;
+    asset.updatedAt = now;
+    asset.version += 1;
+    const inspection: Inspection = {
+      id: this.id('inspection'), assetId, conditionRating: values.conditionRating,
+      observations: values.observations, inspectorId: actor.id, inspectedAt: now, createdAt: now,
+      photos: values.photos.map((photo) => ({
+        id: this.id('photo'), contentType: photo.type as 'image/jpeg' | 'image/png',
+        sizeBytes: photo.size, checksum: '', uploadedAt: now,
+      })),
+    };
+    this.record(assetId, 'inspection_logged', { inspectionId: inspection.id, conditionRating: values.conditionRating, observations: values.observations, healthScore: asset.currentHealthScore });
+    if (wasFlagged !== Boolean(asset.flaggedSince)) {
+      this.record(assetId, asset.flaggedSince ? 'alert_opened' : 'alert_resolved', { healthScore: asset.currentHealthScore });
+    }
+    return copy(inspection);
   }
 }
 
-export const api = new ApiClient();
+export const api = new LocalDataClient();
 
+// PUBLIC_INTERFACE
 export function etagFor(version: number): string {
+  /** Format a local record version for the existing update controls. */
   return `"${version}"`;
 }
 
+// PUBLIC_INTERFACE
 export function describeProblem(error: unknown): string {
-  if (error instanceof ApiProblem) {
-    return error.requestId ? `${error.message} (reference ${error.requestId})` : error.message;
-  }
-  return 'The request could not be completed. Check your connection and try again.';
+  /** Provide a user-readable local validation or workflow error. */
+  return error instanceof ApiProblem ? error.message : 'The local action could not be completed. Please try again.';
 }
