@@ -1,0 +1,1 @@
+"""Adapters: storage, outbox, mail."""

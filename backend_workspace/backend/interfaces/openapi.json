@@ -1,0 +1,63 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infrastructure Asset Health & Predictive Maintenance Tracker API",
+    "description": "HTTP/JSON API for asset registration, health scoring, inspections, predictive alerts, work orders and asset history.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health check",
+        "description": "Returns 200 when the API process is running.",
+        "operationId": "get_health",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Service status, 'ok' when the API is up."
+          },
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "description": "Service name."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "service"
+        ],
+        "title": "HealthResponse",
+        "description": "Response body of the health check."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Liveness and readiness checks."
+    }
+  ]
+}

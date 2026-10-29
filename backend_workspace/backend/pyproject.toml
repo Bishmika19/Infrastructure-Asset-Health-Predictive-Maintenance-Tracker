@@ -1,0 +1,10 @@
+[project]
+name = "asset-health-backend"
+version = "0.1.0"
+description = "FastAPI modular monolith for infrastructure asset health and predictive maintenance."
+requires-python = ">=3.11"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = "venv"

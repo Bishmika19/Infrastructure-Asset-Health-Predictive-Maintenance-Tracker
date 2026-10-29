@@ -1,0 +1,35 @@
+{
+  "name": "asset-health-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . && tsc -b --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:a11y": "playwright test -c test_playwright.config.ts --reporter=list",
+    "test:a11y:install": "playwright install chromium"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.7.0",
+    "@axe-core/react": "^4.13.0",
+    "@eslint/js": "^9.17.0",
+    "@playwright/test": "1.49.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "globals": "^15.14.0",
+    "typescript": "~5.6.3",
+    "typescript-eslint": "^8.18.2",
+    "vite": "^5.4.19",
+    "vitest": "^2.1.8"
+  }
+}

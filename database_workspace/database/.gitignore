@@ -1,0 +1,5 @@
+pgdata/
+postgres.log
+db_connection.txt
+database_urls.env
+.env

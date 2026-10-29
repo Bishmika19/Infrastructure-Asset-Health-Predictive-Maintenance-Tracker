@@ -1,0 +1,45 @@
+# Local secrets and connection details
+.env
+.env.*
+!.env.example
+database_urls.env
+db_connection.txt
+*.pem
+*.key
+
+# Dependencies and generated files
+venv/
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Local runtime state
+*.log
+logs/
+pgdata/
+.kavia/
+.DS_Store
+
+# Workspace tooling and generated project metadata
+.codewiki/
+.codewiki_mkdocs/
+.codewiki_site/
+.config.json
+.projdefn/
+assets/
+figmafiles/
+skills/
+temp-attachments/
+Infrastructure-Asset-Health-Predictive-Maintenance-Tracker/
+kavia-docs/Memory/
